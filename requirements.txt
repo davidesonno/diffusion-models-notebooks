@@ -1,0 +1,7 @@
+numpy
+torch
+matplotlib
+pandas
+transformers
+accelerate
+diffusers
