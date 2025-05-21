@@ -1,17 +1,17 @@
 import json
 import io
 import zipfile
+import google.colab as clb
 
 from PIL import Image
-from google.colab import files
 
-def read_prompts_json(file:str='prompts.json'):
-    with open("prompts.json", "r", encoding="utf-8") as file:
+def read_prompts_json(file:str):
+    with open(file, "r", encoding="utf-8") as file:
         prompts = json.load(file)
 
     return prompts
 
-def load_generative_model_pipeline(model_id:str, torch_dtype=None, device:str=None):
+def load_generative_model_pipeline(model_id:str, torch_dtype=None):
     # if model == "playgroundai/playground-v2.5-1024px-aesthetic":
     #     import os
     #     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -27,6 +27,8 @@ def load_generative_model_pipeline(model_id:str, torch_dtype=None, device:str=No
     )
     if torch_dtype is None:
         torch_dtype = torch.float16
+    else:
+        torch_dtype = getattr(torch, torch_dtype)
     pipe = None
 
     if model_id == "sd-legacy/stable-diffusion-v1-5":
@@ -49,9 +51,6 @@ def load_generative_model_pipeline(model_id:str, torch_dtype=None, device:str=No
         vae = AutoencoderKL.from_pretrained("madebyollin/sdxl-vae-fp16-fix", torch_dtype=torch_dtype)
         pipe = StableDiffusionXLPipeline.from_pretrained(model_id, vae=vae, torch_dtype=torch_dtype)
         pipe.scheduler = KDPM2AncestralDiscreteScheduler.from_config(pipe.scheduler.config)
-
-    if device is not None:
-        pipe = pipe.to(device)
 
     return pipe
 
@@ -86,7 +85,8 @@ def generate_images_with_pipeline(pipeline, prompts:dict, v:int=2):
 
     return generated_images
 
-def create_zip_from_images_dict(generated_images:dict, filename='generated_images.zip', start_download=True):
+
+def create_zip_from_images_dict(generated_images:dict, filename='generated_images.zip', start_download=False):
     if not filename.endswith('.zip'):
         filename += '.zip'
 
@@ -94,8 +94,8 @@ def create_zip_from_images_dict(generated_images:dict, filename='generated_image
     with zipfile.ZipFile(zip_buffer, 'w') as zipf:
         for subject, files in generated_images.items():
             folder_name = subject.replace(' ', '_')  # Ensure safe folder name
-            for filename, img in files.items():
-                img_path = f"{folder_name}/{filename}"
+            for img_name, img in files.items():
+                img_path = f"{folder_name}/{img_name}"
                 img_bytes = io.BytesIO()
                 img.convert("RGB").save(img_bytes, format="JPEG")
                 zipf.writestr(img_path, img_bytes.getvalue())
@@ -105,4 +105,4 @@ def create_zip_from_images_dict(generated_images:dict, filename='generated_image
         f.write(zip_buffer.getvalue())
 
     if start_download:
-        files.download(filename)
+        clb.files.download(filename)
