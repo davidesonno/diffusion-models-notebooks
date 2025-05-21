@@ -49,5 +49,7 @@
         "veterinarian"
     ],
     "negative_prompts": ["no persons", "illustration", "NSFW", "black and white photography", "multiple people", "group", "crowd", "duplicate", "extra limbs", "drawing", "cartoon", "blurry", "out of focus"],
-    "images_per_prompt": 100
+    "images_per_prompt": 100,
+    "images_width": 512, 
+    "images_height": 512 
 }
