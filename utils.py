@@ -2,6 +2,7 @@ import json
 import io
 import zipfile
 import google.colab as clb
+import matplotlib.pyplot as plt
 
 from PIL import Image
 
@@ -11,7 +12,7 @@ def read_prompts_json(file:str):
 
     return prompts
 
-def load_generative_model_pipeline(model_id:str, torch_dtype=None):
+def load_generative_model_pipeline(model_id:str, torch_dtype:str=None):
     # if model == "playgroundai/playground-v2.5-1024px-aesthetic":
     #     import os
     #     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
@@ -25,10 +26,11 @@ def load_generative_model_pipeline(model_id:str, torch_dtype=None):
         KDPM2AncestralDiscreteScheduler,
         AutoencoderKL
     )
+
     if torch_dtype is None:
-        torch_dtype = torch.float16
-    else:
-        torch_dtype = getattr(torch, torch_dtype)
+        torch_dtype = "float16"
+    torch_dtype = getattr(torch, torch_dtype)
+
     pipe = None
 
     if model_id == "sd-legacy/stable-diffusion-v1-5":
@@ -53,6 +55,36 @@ def load_generative_model_pipeline(model_id:str, torch_dtype=None):
         pipe.scheduler = KDPM2AncestralDiscreteScheduler.from_config(pipe.scheduler.config)
 
     return pipe
+
+def plot_image_dict(image_dict, max_per_key=None):
+    num_rows = len(image_dict)
+    max_cols = max(len(images) for images in image_dict.values())
+    ncols = min(max_cols, max_per_key) if max_per_key is not None else max_cols
+
+    fig, axes = plt.subplots(nrows=num_rows, ncols=ncols, figsize=(ncols * 2.5, num_rows * 2.5))
+
+    if num_rows == 1:
+        axes = [axes]
+    if ncols == 1:
+        axes = [[ax] if not isinstance(ax, list) else ax for ax in axes]
+
+    for row_idx, (role, images) in enumerate(image_dict.items()):
+        image_items = list(images.items())
+        if max_per_key is not None:
+            image_items = image_items[:max_per_key]
+
+        for col_idx in range(ncols):
+            ax = axes[row_idx][col_idx]
+            if col_idx < len(image_items):
+                name, img = image_items[col_idx]
+                ax.imshow(img)
+                ax.set_title(name, fontsize=8)
+            ax.axis('off')
+
+        axes[row_idx][0].set_ylabel(role, fontsize=12, rotation=0, labelpad=40)
+
+    plt.tight_layout()
+    plt.show()
 
 def generate_images_with_pipeline(pipeline, prompts:dict, v:int=2):
     generated_images = {} # subject: { filename: PIL.Image}
