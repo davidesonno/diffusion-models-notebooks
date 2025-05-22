@@ -1,6 +1,7 @@
 import json
 import io
 import zipfile
+import textwrap
 import google.colab as clb
 import matplotlib.pyplot as plt
 
@@ -17,7 +18,7 @@ def load_generative_model_pipeline(model_id:str, torch_dtype:str=None):
     #     import os
     #     os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-    import torch # importing here because the above code needs to be executed first
+    import torch # importing here because the above code needs to be executed before import torch
     from diffusers import (
         DiffusionPipeline,
         StableDiffusionPipeline,
@@ -56,36 +57,6 @@ def load_generative_model_pipeline(model_id:str, torch_dtype:str=None):
 
     return pipe
 
-def plot_image_dict(image_dict, max_per_key=None):
-    num_rows = len(image_dict)
-    max_cols = max(len(images) for images in image_dict.values())
-    ncols = min(max_cols, max_per_key) if max_per_key is not None else max_cols
-
-    fig, axes = plt.subplots(nrows=num_rows, ncols=ncols, figsize=(ncols * 2.5, num_rows * 2.5))
-
-    if num_rows == 1:
-        axes = [axes]
-    if ncols == 1:
-        axes = [[ax] if not isinstance(ax, list) else ax for ax in axes]
-
-    for row_idx, (role, images) in enumerate(image_dict.items()):
-        image_items = list(images.items())
-        if max_per_key is not None:
-            image_items = image_items[:max_per_key]
-
-        for col_idx in range(ncols):
-            ax = axes[row_idx][col_idx]
-            if col_idx < len(image_items):
-                name, img = image_items[col_idx]
-                ax.imshow(img)
-                ax.set_title(name, fontsize=8)
-            ax.axis('off')
-
-        axes[row_idx][0].set_ylabel(role, fontsize=12, rotation=0, labelpad=40)
-
-    plt.tight_layout()
-    plt.show()
-
 def generate_images_with_pipeline(pipeline, prompts:dict, v:int=2):
     generated_images = {} # subject: { filename: PIL.Image}
     images_per_prompt = prompts['images_per_prompt']
@@ -117,6 +88,72 @@ def generate_images_with_pipeline(pipeline, prompts:dict, v:int=2):
 
     return generated_images
 
+def extract_images_from_zip(zip_path):
+    image_dict = {}
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        for file_path in zip_ref.namelist():
+            if file_path.lower().endswith((".jpg", ".jpeg", ".png")) and '/' in file_path:
+                role, filename = file_path.split('/', 1)
+                with zip_ref.open(file_path) as file:
+                    image = Image.open(file).convert('RGB')
+                    if role not in image_dict:
+                        image_dict[role] = {}
+                    image_dict[role][filename] = image
+    return image_dict
+
+def caption_images(image_dict, processor, model, conditional_captioning_text: str = None, device: str = "cuda"):
+    import torch
+    model.eval()
+    caption_dict = {}
+    device = torch.device(device if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    for subject, images in image_dict.items():
+        filenames = list(images.keys())
+        pil_images = list(images.values())
+
+        if conditional_captioning_text:
+            inputs = processor(pil_images, [conditional_captioning_text] * len(pil_images), return_tensors="pt", padding=True).to(device)
+        else:
+            inputs = processor(pil_images, return_tensors="pt", padding=True).to(device)
+
+        outputs = model.generate(**inputs)
+        captions = processor.batch_decode(outputs, skip_special_tokens=True)
+        caption_dict[subject] = {filename: caption for filename, caption in zip(filenames, captions)}
+
+    return caption_dict
+
+def plot_image_dict(image_dict, labels=None, max_per_key=None):
+    num_rows = len(image_dict)
+    max_cols = max(len(images) for images in image_dict.values())
+    ncols = min(max_cols, max_per_key) if max_per_key is not None else max_cols
+
+    fig, axes = plt.subplots(nrows=num_rows, ncols=ncols, figsize=(ncols * 2.5, num_rows * 2.5))
+
+    if num_rows == 1:
+        axes = [axes]
+    if ncols == 1:
+        axes = [[ax] if not isinstance(ax, list) else ax for ax in axes]
+
+    for row_idx, (subject, images) in enumerate(image_dict.items()):
+        image_items = list(images.items())
+        if max_per_key is not None:
+            image_items = image_items[:max_per_key]
+
+        for col_idx in range(ncols):
+            ax = axes[row_idx][col_idx]
+            if col_idx < len(image_items):
+                name, img = image_items[col_idx]
+                ax.imshow(img)
+                title_text = labels[subject][name] if labels is not None else name
+                wrapped_title = "\n".join(textwrap.wrap(title_text, width=35))
+                ax.set_title(wrapped_title, fontsize=8)
+            ax.axis('off')
+
+        axes[row_idx][0].set_ylabel(subject, fontsize=12, rotation=0, labelpad=40)
+
+    plt.tight_layout()
+    plt.show()
 
 def create_zip_from_images_dict(generated_images:dict, filename='generated_images.zip', start_download=False):
     if not filename.endswith('.zip'):
