@@ -123,6 +123,73 @@ def caption_images(image_dict, processor, model, conditional_captioning_text: st
 
     return caption_dict
 
+# for florence-type models
+def caption_images_florence(image_dict, model, processor, task_prompt: str | list, text_input=None):
+    if isinstance(task_prompt, str):
+        task_prompt = [task_prompt]  # Ensure task_prompt is a list
+
+    results = {}
+
+    for subject, image_set in image_dict.items():
+        results[subject] = {}
+        for image_name, image in image_set.items():
+            results[subject][image_name] = {}
+
+            for task in task_prompt:
+                if text_input is None:
+                    prompt = task
+                else:
+                    prompt = task + text_input
+
+                inputs = processor(text=prompt, images=image, return_tensors="pt").to('cuda')
+                generated_ids = model.generate(
+                    input_ids=inputs["input_ids"].cuda(),
+                    pixel_values=inputs["pixel_values"].cuda(),
+                    max_new_tokens=1024,
+                    early_stopping=False,
+                    do_sample=False,
+                    num_beams=3,
+                )
+                generated_text = processor.batch_decode(generated_ids, skip_special_tokens=False)[0]
+                parsed_answer = processor.post_process_generation(
+                    generated_text,
+                    task=task,
+                    image_size=(image.width, image.height)
+                )
+
+                results[subject][image_name][task] = parsed_answer[task]
+
+    return results
+
+def parse_tasks_labels(tasks_labels:dict):
+    parsed = {}
+
+    for subject, subject_dict in tasks_labels.items():
+        parsed[subject] = {}
+        for image_name, image_dict in subject_dict.items():
+            parsed[subject][image_name] = {
+                'gender' : None,
+                'race': []
+            }
+            for task, task_caption in image_dict.items():
+                c:str = task_caption.lower()
+                if 'CAPTION' in task: # so that it works with <CAPTION>, <DETAILED_CAPTION>, <MORE_DETAILED_CAPTION>, <MIXED_CAPTION> and <MIXED_CAPTION_PLUS>
+                    if any(word in c for word in ['woman', 'female', 'girl']):
+                        parsed[subject][image_name]['gender'] = 'f'
+                    elif any(word in c for word in ['man', 'male', 'boy']):
+                        parsed[subject][image_name]['gender'] = 'm'
+                if 'ANALYZE' in task:
+                    a = [element.split(': ') for element in c.split(', ')]
+                    for element in a:
+                        try:
+                            tag, value = element
+                            if tag == 'race':
+                                parsed[subject][image_name]['race'].extend(value.split(';'))
+                                break
+                        except: pass
+
+    return parsed
+
 def plot_image_dict(image_dict, labels=None, max_per_key=None):
     num_rows = len(image_dict)
     max_cols = max(len(images) for images in image_dict.values())
@@ -145,7 +212,7 @@ def plot_image_dict(image_dict, labels=None, max_per_key=None):
             if col_idx < len(image_items):
                 name, img = image_items[col_idx]
                 ax.imshow(img)
-                title_text = labels[subject][name] if labels is not None else name
+                title_text = str(labels[subject][name]) if labels is not None else name
                 wrapped_title = "\n".join(textwrap.wrap(title_text, width=35))
                 ax.set_title(wrapped_title, fontsize=8)
             ax.axis('off')
